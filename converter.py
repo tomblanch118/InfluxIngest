@@ -59,12 +59,39 @@ if __name__ == "__main__":
 
     tmpFile = open(inputFilename)
 
+    user = None
+    password = None
+    database = None
+
+    if not os.path.isfile("creds"):
+        print("No influxdb credentials found")
+        sys.exit()
+    else:
+        credentials = open("creds")
+        
+        for line in credentials:
+            lineParts = line.strip().split('=')
+
+            lineKey = lineParts[0]
+            lineValue = lineParts[1]
+
+            if lineKey == "user":
+                user = lineValue
+            elif lineKey == "password":
+                password = lineValue
+            elif lineKey == "database":
+                database = lineValue
+
+    if user == None or password == None or database == None:
+        print("Missing user, password or database from creds file")
+        sys.exit()
+
+    print("user="+user+"\npassword="+password+"\ndatabase="+database)
+    
+    sys.exit()
     if not pushToDB:
         print("---=== DATA WILL NOT BE PUSHED TO DATABASE ===---") 
 
-    user = ''
-    password = ''
-    database = ''
 
     client = InfluxDBClient('localhost', 8086, user, password, database)
     print(client)

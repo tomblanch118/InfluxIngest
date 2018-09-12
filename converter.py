@@ -86,9 +86,7 @@ if __name__ == "__main__":
         print("Missing user, password or database from creds file")
         sys.exit()
 
-    print("user="+user+"\npassword="+password+"\ndatabase="+database)
     
-    sys.exit()
     if not pushToDB:
         print("---=== DATA WILL NOT BE PUSHED TO DATABASE ===---") 
 
@@ -172,6 +170,16 @@ if __name__ == "__main__":
         timedate = datetime.strftime(timedate,timeOutputFormat)
 
         index = 0
+
+
+        datapoint = {}
+        datapoint['measurement'] = dataFormat.get("measurement_name")
+        datapoint['fields'] = {}
+        
+        datapoint['time'] = timedate 
+        datapoint['tags'] = {}
+        datapoint['tags']['node'] = node
+        
         for component in components:
 
             #check data in field against dataFormat spec unless we have specified to ignore
@@ -186,26 +194,14 @@ if __name__ == "__main__":
                 if componentValid== True:  
                     fieldName = dataFormat.get(index)['name']
 
-                    datapoint = {}
-                    datapoint['measurement'] = dataFormat.get("measurement_name")
-                    datapoint['fields'] = {}
                     datapoint['fields'][fieldName] = castValue 
-                    datapoint['time'] = timedate 
-                    datapoint['tags'] = {}
-                    datapoint['tags']['node'] = node
-                    points.append(datapoint)
 
-                #TODO:proper debug output
-                #else:
-                #    sys.stderr.write('Error converting: '+component+"\n")
             index = index + 1
 
-        #dont need this
-        #print(json.dumps(points, indent=4, separators=(',',':')))
-        #success = client.write_points(points)
-        #print(success)
         count = count + 1
 
+        points.append(datapoint)
+        
         if count > batchSize:
             count=0
 

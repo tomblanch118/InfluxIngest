@@ -1,5 +1,6 @@
 import json
 from influxdb import InfluxDBClient
+from pytz import UTC
 from datetime import datetime
 import sys
 import math
@@ -142,6 +143,9 @@ if __name__ == "__main__":
 
     linesProc = 0
 
+
+    EPOCH = UTC.localize(datetime.utcfromtimestamp(0))
+
     for line in tmpFile:
 
         components = line.split(",")
@@ -166,20 +170,29 @@ if __name__ == "__main__":
         #TODO: get this by name
         node = components[1]
 
+
+        tmpTime = UTC.localize(timedate)
+
+        
         #convert the date time into the correct format for influx
         timedate = datetime.strftime(timedate,timeOutputFormat)
 
         index = 0
 
 
-        datapoint = {}
-        datapoint['measurement'] = dataFormat.get("measurement_name")
-        datapoint['fields'] = {}
+        #datapoint = []
+        #datapoint['measurement'] = dataFormat.get("measurement_name")
+        #datapoint['fields'] = {}
         
-        datapoint['time'] = timedate 
-        datapoint['tags'] = {}
-        datapoint['tags']['node'] = node
-        
+        #datapoint['time'] = timedate 
+        #datapoint['tags'] = {}
+        #datapoint['tags']['node'] = node
+       
+
+        lfmt = "" + dataFormat.get("measurement_name")
+        lfmt = lfmt + ",node="+node+" "
+
+        fieldsList =[]
         for component in components:
 
             #check data in field against dataFormat spec unless we have specified to ignore
@@ -194,13 +207,33 @@ if __name__ == "__main__":
                 if componentValid== True:  
                     fieldName = dataFormat.get(index)['name']
 
-                    datapoint['fields'][fieldName] = castValue 
+                    #datapoint['fields'][fieldName] = castValue 
+
+                            
+                    tmp = dataFormat.get(index)['name']+"="
+                    
+                    fieldType = dataFormat.get(index)['dataType']
+
+                    if fieldType == "int":
+                        tmp = tmp + str(castValue) + "i"
+                    elif fieldType == "float":
+                        tmp = tmp +str(castValue)
+                    else:
+                        tmp = "\""+ str(castValue)+"\""
+
+                    fieldsList.append(tmp)
 
             index = index + 1
 
+        #
+        lfmt = lfmt + ",".join(fieldsList)
+        ns = (tmpTime - EPOCH).total_seconds() * 1e9
+        lfmt = lfmt + " " + str(int(ns))
+        points.append(lfmt)
+        #print(lfmt)
+        #print(datapoint)
         count = count + 1
 
-        points.append(datapoint)
         
         if count > batchSize:
             count=0
@@ -211,7 +244,8 @@ if __name__ == "__main__":
             sys.stdout.flush()
 
             if pushToDB:
-                client.write_points(points)
+                client.write_points(points, protocol="line")
+                #sys.exit()
             else:
                 print(points)
                 sys.exit()
@@ -219,7 +253,7 @@ if __name__ == "__main__":
 
     #catch any points that weren't written yet
     if pushToDB:
-        client.write_points(points,batch_size=1000)
+        client.write_points(points,protocol="line",batch_size=1000)
 
     end = datetime.now()
     diff = (end-start).total_seconds()

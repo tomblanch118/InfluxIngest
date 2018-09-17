@@ -109,10 +109,8 @@ if __name__ == "__main__":
         sys.exit()
 
 
-    #TODO: turn into influx line format?
     #TODO: check node address but dont add maybe specify tag/field/ignore
     #TODO: maybe add a processing function name?
-        #get the date/time format and expected number of fields from the format file 
     timeFormat = dataFormat.get("datetimeFormat")
     requiredNumFields = dataFormat.get("numberOfFields")
     
@@ -146,8 +144,10 @@ if __name__ == "__main__":
 
     EPOCH = UTC.localize(datetime.utcfromtimestamp(0))
 
+    #Iterate through the datafile
     for line in tmpFile:
 
+        #Assume that fields are comma delimitted
         components = line.split(",")
 
         #less than the required number of components suggests something went wrong and to distrust/skip the line
@@ -164,40 +164,36 @@ if __name__ == "__main__":
                 raise ValueError()
 
         except ValueError:
-            #print('invalid datetime:'+str(timedate))
             continue
 
-        #TODO: get this by name
+        #TODO: Need a better way of getting tags, range checking them and skipping lines if necessary
+        #Get the node ID
         node = components[1]
-
-
+        
+        #TODO: Honestly not sure how this will work across a summer time boundary?
+        #Localise the timestamp so that we can perform the necessary conversions
         tmpTime = UTC.localize(timedate)
 
         
         #convert the date time into the correct format for influx
-        timedate = datetime.strftime(timedate,timeOutputFormat)
+        #timedate = datetime.strftime(timedate,timeOutputFormat)
 
+        #Field index
         index = 0
 
-
-        #datapoint = []
-        #datapoint['measurement'] = dataFormat.get("measurement_name")
-        #datapoint['fields'] = {}
-        
-        #datapoint['time'] = timedate 
-        #datapoint['tags'] = {}
-        #datapoint['tags']['node'] = node
-       
-
+        #Construct the start of the influx line format record
         lfmt = "" + dataFormat.get("measurement_name")
         lfmt = lfmt + ",node="+node+" "
 
+        #Build a list of fields to be joined to the line format strnig
         fieldsList =[]
         for component in components:
 
             #check data in field against dataFormat spec unless we have specified to ignore
             if dataFormat.get(index)['ignore'] == 'false':
 
+                #Get the type, min and max information from the dataFormat structure
+                #and check that it is valid
                 dType = dataFormat.get(index)['dataType']
                 dMin= dataFormat.get(index)['min']
                 dMax = dataFormat.get(index)['max']
@@ -205,18 +201,16 @@ if __name__ == "__main__":
 
                 #if the data in the field is valid construct the data point
                 if componentValid== True:  
+
+                    #build the field record from the field name, the data and the type
                     fieldName = dataFormat.get(index)['name']
-
-                    #datapoint['fields'][fieldName] = castValue 
-
-                            
                     tmp = dataFormat.get(index)['name']+"="
                     
-                    fieldType = dataFormat.get(index)['dataType']
+                    dType = dataFormat.get(index)['dataType']
 
-                    if fieldType == "int":
+                    if dType == "int":
                         tmp = tmp + str(castValue) + "i"
-                    elif fieldType == "float":
+                    elif dType == "float":
                         tmp = tmp +str(castValue)
                     else:
                         tmp = "\""+ str(castValue)+"\""
@@ -225,24 +219,29 @@ if __name__ == "__main__":
 
             index = index + 1
 
-        #
+        #join all of the fields together as a comma separated string
         lfmt = lfmt + ",".join(fieldsList)
+
+        #Convert the date/time into a nanosecond utc timestamp
         ns = (tmpTime - EPOCH).total_seconds() * 1e9
         lfmt = lfmt + " " + str(int(ns))
+        
+        #Append the whole influx line format record to the list of records still to be sent to influxdb
         points.append(lfmt)
-        #print(lfmt)
-        #print(datapoint)
         count = count + 1
 
-        
+        #Perform batching manually to allow some measure of progress analysis
         if count > batchSize:
             count=0
 
             linesProc = linesProc + batchSize
 
+            #TODO: actually read the number of lines in file, have to take into account the skipped lines!
+            #Provide estimate of progress
             sys.stdout.write(str((100.0/1143184.0)*linesProc)+"\n")
             sys.stdout.flush()
 
+            #If this is not a test run, push the list of influx
             if pushToDB:
                 client.write_points(points, protocol="line")
                 #sys.exit()

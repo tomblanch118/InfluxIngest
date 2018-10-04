@@ -2,6 +2,7 @@ import json
 from influxdb import InfluxDBClient
 from pytz import UTC
 from datetime import datetime
+from datetime import timedelta
 import sys
 import math
 import os.path
@@ -14,10 +15,11 @@ import os.path
 #date/time format use by influx
 timeOutputFormat = '%Y-%m-%dT%H:%M:%SZ'
 pushToDB = True#False
-boundsCheck = True
+#boundsCheck = True
 batchSize = 1000
+delimiter = ","
 
-def testValue(value, expectedFormat,minVal,maxVal):
+def coerceValue(value, expectedFormat):
     castValue = ""
     try:
         if expectedFormat == 'int':
@@ -30,12 +32,9 @@ def testValue(value, expectedFormat,minVal,maxVal):
                 raise ValueError()
     except ValueError:
         return False,value
+        
+    return True,castValue
 
-    if (castValue >= minVal and castValue <= maxVal) or (not boundsCheck):
-        return True,castValue
-
-    #print(str(minVal)+" > " + str(castValue)+" > "+str(maxVal))    
-    return False,value
 
 if __name__ == "__main__":
 
@@ -114,10 +113,11 @@ if __name__ == "__main__":
     timeFormat = dataFormat.get("datetimeFormat")
     requiredNumFields = dataFormat.get("numberOfFields")
     
-    if "boundsCheck" in dataFormat:
+    """if "boundsCheck" in dataFormat:
         if not dataFormat.get("boundsCheck"):
             boundsCheck = False
             print("Bounds checking off")
+    """
 
     try:
         timeMin = datetime.strptime(dataFormat.get(0)['min'],timeFormat)
@@ -147,8 +147,8 @@ if __name__ == "__main__":
     #Iterate through the datafile
     for line in tmpFile:
 
-        #Assume that fields are comma delimitted
-        components = line.split(",")
+        #split line into component parts
+        components = line.split(delimiter)
 
         #less than the required number of components suggests something went wrong and to distrust/skip the line
         numComponents = len(components)
@@ -160,15 +160,14 @@ if __name__ == "__main__":
             timedate = components[0]
             timedate = datetime.strptime(timedate, timeFormat)
 
+            #DST adjust
+            #timedate = timedate - timedelta(hours=1)
             if timedate <  timeMin or timedate > timeMax:
                 raise ValueError()
 
         except ValueError:
             continue
 
-        #TODO: Need a better way of getting tags, range checking them and skipping lines if necessary
-        #Get the node ID
-        node = components[1]
         
         #TODO: Honestly not sure how this will work across a summer time boundary?
         #Localise the timestamp so that we can perform the necessary conversions
@@ -183,41 +182,76 @@ if __name__ == "__main__":
 
         #Construct the start of the influx line format record
         lfmt = "" + dataFormat.get("measurement_name")
-        lfmt = lfmt + ",node="+node+" "
+        #lfmt = lfmt + ",node="+node+" "
 
         #Build a list of fields to be joined to the line format strnig
         fieldsList =[]
+        tagList = []
+
         for component in components:
 
             #check data in field against dataFormat spec unless we have specified to ignore
             if dataFormat.get(index)['ignore'] == 'false':
+    
+
+                #TODO: this is horrible 
+                #TODO: check the specification first before doing this then we
+                #can get rid of a bunch of repeated checks
+                componentType = dataFormat.get(index)['componentType']
+                
+                if componentType != "tag" and componentType != "field":
+                    print("Invalid component type in spec")
+                    sys.exit()
+                
+                doBoundCheck = dataFormat.get(index)['boundCheck']
+            
+                if doBoundCheck != "true" and doBoundCheck != "false":
+                    print("invalid bound check rule: "+ str(doBoundCheck) )
+                    sys.exit()
+
 
                 #Get the type, min and max information from the dataFormat structure
                 #and check that it is valid
                 dType = dataFormat.get(index)['dataType']
                 dMin= dataFormat.get(index)['min']
                 dMax = dataFormat.get(index)['max']
-                componentValid,castValue = testValue(component,dType,dMin,dMax )
+                #componentValid,castValue = testValue(component,dType,dMin,dMax )
 
+		coercedSuccess,coercedValue = coerceValue(component,dType)
+
+    		inBounds = (coercedValue >= dMin and coercedValue<= dMax)
+
+
+                #print(str(coercedSuccess) + ", " + str(inBounds) + ", " + str(doBoundCheck) + ", "+str(coercedValue) )
                 #if the data in the field is valid construct the data point
-                if componentValid== True:  
+                if( coercedSuccess == True  and  (inBounds == True or doBoundCheck == "false" ) ):  
 
                     #build the field record from the field name, the data and the type
-                    fieldName = dataFormat.get(index)['name']
                     tmp = dataFormat.get(index)['name']+"="
-                    
-                    dType = dataFormat.get(index)['dataType']
+                   
+                    if componentType == "field":
+                        dType = dataFormat.get(index)['dataType']
 
-                    if dType == "int":
-                        tmp = tmp + str(castValue) + "i"
-                    elif dType == "float":
-                        tmp = tmp +str(castValue)
+                        if dType == "int":
+                            tmp = tmp + str(coercedValue) + "i"
+                        elif dType == "float":
+                            tmp = tmp +str(coercedValue)
+                        else:
+                            tmp = "\""+ str(coercedValue)+"\""
+                        
+
+                        fieldsList.append(tmp)
+
                     else:
-                        tmp = "\""+ str(castValue)+"\""
-
-                    fieldsList.append(tmp)
-
+                        #TODO: What should we do it there are no tags?
+                        tmp = tmp + str(castValue)
+                        tagList.append(tmp)
+    
             index = index + 1
+        if len(tagList) > 0:
+            lfmt = lfmt + "," +",".join(tagList) + " "
+        else:
+            lfmt = lfmt + " "
 
         #join all of the fields together as a comma separated string
         lfmt = lfmt + ",".join(fieldsList)

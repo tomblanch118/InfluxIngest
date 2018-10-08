@@ -244,10 +244,12 @@ if __name__ == "__main__":
 
                     else:
                         #TODO: What should we do it there are no tags?
-                        tmp = tmp + str(castValue)
+                        tmp = tmp + str(coercedValue)
                         tagList.append(tmp)
     
             index = index + 1
+        #print(len(tagList))
+
         if len(tagList) > 0:
             lfmt = lfmt + "," +",".join(tagList) + " "
         else:
